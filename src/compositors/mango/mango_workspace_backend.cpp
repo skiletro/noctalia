@@ -250,6 +250,7 @@ void MangoWorkspaceBackend::dispatchPoll(short revents) {
     return;
   }
   if ((revents & (POLLHUP | POLLERR | POLLNVAL)) != 0) {
+    kLog.warn("Mango IPC workspace disconnect fd={} poll revents={:#x}", m_watchFd, revents);
     closeWatchSocket();
     notifyChanged();
     return;
@@ -348,6 +349,7 @@ void MangoWorkspaceBackend::readWatchSocket() {
       continue;
     }
     if (count == 0) {
+      kLog.warn("Mango IPC workspace disconnect fd={} receive EOF", m_watchFd);
       closeWatchSocket();
       changed = true;
       break;
@@ -356,6 +358,8 @@ void MangoWorkspaceBackend::readWatchSocket() {
       continue;
     }
     if (errno != EAGAIN && errno != EWOULDBLOCK) {
+      const int error = errno;
+      kLog.warn("Mango IPC workspace disconnect fd={} receive errno={} ({})", m_watchFd, error, std::strerror(error));
       closeWatchSocket();
       changed = true;
     }

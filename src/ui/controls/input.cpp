@@ -18,6 +18,7 @@
 #include "ui/controls/label.h"
 #include "ui/palette.h"
 #include "ui/style.h"
+#include "util/string_utils.h"
 #include "wayland/text_input_service.h"
 
 #include <algorithm>
@@ -850,7 +851,7 @@ void Input::rebuildCursorStopsFull(Renderer& renderer) {
 
   if (m_value.empty()) {
     if (m_multiline) {
-      m_stopRect.push_back(TextCursorStop{0.0F, 0.0F, renderer.fontRowExtent(m_fontSize, m_label->fontWeight())});
+      m_stopRect.push_back(TextCursorStop{0.0F, 0.0F, renderer.fontRowExtent(m_fontSize, m_label->font())});
     }
     return;
   }
@@ -868,7 +869,7 @@ void Input::rebuildCursorStopsFull(Renderer& renderer) {
   }
   if (m_multiline) {
     renderer.measureTextCursorStopsWrapped(
-        m_value, m_fontSize, m_stopByte, m_stopsBuiltForWidth, m_stopRect, m_label->fontWeight()
+        m_value, m_fontSize, m_stopByte, m_stopsBuiltForWidth, m_stopRect, m_label->font()
     );
     if (m_stopRect.size() != m_stopByte.size()) {
       m_stopRect.assign(m_stopByte.size(), TextCursorStop{0.0F, 0.0F, m_fontSize});
@@ -878,7 +879,7 @@ void Input::rebuildCursorStopsFull(Renderer& renderer) {
       m_stopX[i] = m_stopRect[i].x;
     }
   } else if (!showPasswordGlyphs) {
-    renderer.measureTextCursorStops(m_value, m_fontSize, m_stopByte, m_stopX, m_label->fontWeight());
+    renderer.measureTextCursorStops(m_value, m_fontSize, m_stopByte, m_stopX, m_label->font());
     if (m_stopX.size() != m_stopByte.size()) {
       m_stopX.assign(m_stopByte.size(), 0.0F);
     }
@@ -911,7 +912,7 @@ void Input::recomputeContentLeadSlack(Renderer& renderer, float width, bool show
   } else if (!m_value.empty() && !m_stopX.empty()) {
     textExtent = *std::ranges::max_element(m_stopX);
   } else if (m_value.empty() && !m_placeholder.empty()) {
-    textExtent = renderer.measureText(m_placeholder, m_fontSize, m_label->fontWeight()).width;
+    textExtent = renderer.measureText(m_placeholder, m_fontSize, m_label->font()).width;
   }
   if (viewportWidth > 0.0F && textExtent > 0.0F && textExtent + 0.5F < viewportWidth) {
     m_contentLeadSlack = m_textAlign == TextAlign::Center ? std::round((viewportWidth - textExtent) * 0.5F)
@@ -1435,7 +1436,7 @@ void Input::handleKey(std::uint32_t sym, std::uint32_t utf32, std::uint32_t modi
     if (hasSelection()) {
       deleteSelection();
     }
-    const auto bytes = utf32ToUtf8(utf32);
+    const auto bytes = StringUtils::utf32ToUtf8(utf32);
     m_value.insert(m_cursorPos, bytes);
     if (preedit) {
       m_preeditStart = m_cursorPos;
@@ -2548,24 +2549,4 @@ std::size_t Input::prevCharPos(const std::string& s, std::size_t pos) {
     --pos;
   }
   return pos;
-}
-
-std::string Input::utf32ToUtf8(std::uint32_t cp) {
-  std::string result;
-  if (cp < 0x80U) {
-    result += static_cast<char>(cp);
-  } else if (cp < 0x800U) {
-    result += static_cast<char>(0xC0U | (cp >> 6U));
-    result += static_cast<char>(0x80U | (cp & 0x3FU));
-  } else if (cp < 0x10000U) {
-    result += static_cast<char>(0xE0U | (cp >> 12U));
-    result += static_cast<char>(0x80U | ((cp >> 6U) & 0x3FU));
-    result += static_cast<char>(0x80U | (cp & 0x3FU));
-  } else {
-    result += static_cast<char>(0xF0U | (cp >> 18U));
-    result += static_cast<char>(0x80U | ((cp >> 12U) & 0x3FU));
-    result += static_cast<char>(0x80U | ((cp >> 6U) & 0x3FU));
-    result += static_cast<char>(0x80U | (cp & 0x3FU));
-  }
-  return result;
 }

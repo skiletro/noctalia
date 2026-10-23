@@ -1429,10 +1429,27 @@ namespace {
     return nullptr;
   }
 
+  // An accordion run wants to be expanded while one of its widgets is hovered or, once it has started
+  // unfolding, while the pointer stays anywhere over its capsule (gaps and padding included).
+  bool accordionRunWantsExpansion(const BarInstance& instance, const BarCapsuleRun& run, const Widget* target) {
+    if (target != nullptr && std::ranges::contains(run.widgets, target)) {
+      return true;
+    }
+    return (run.accordionExpanded || run.accordionProgress > 0.0F)
+        && instance.pointerInside
+        && pointInsideNode(run.shell, instance.lastPointerSx, instance.lastPointerSy);
+  }
+
   // The area the tooltip manager may show a tooltip for: none when the owning widget disables tooltips.
   InputArea* tooltipAreaForHover(BarInstance& instance, InputArea* hoveredArea) {
     const Widget* owner = widgetFromHoveredArea(instance, hoveredArea);
     return owner != nullptr && !owner->showsTooltip() ? nullptr : hoveredArea;
+  }
+
+  bool widgetsWantSecondTicks(const std::vector<std::unique_ptr<Widget>>& widgets) {
+    return std::ranges::any_of(widgets, [](const auto& widget) {
+      return widget != nullptr && widget->wantsSecondTicks();
+    });
   }
 
 } // namespace
@@ -1524,10 +1541,19 @@ BarServices Bar::services() const {
 }
 
 void Bar::onSecondTick() {
+  // Without a widget that renders seconds, a full bar update once a minute is
+  // enough, so skip the other 59 ticks instead of re-laying out every surface.
+  const auto minute = std::chrono::floor<std::chrono::minutes>(std::chrono::system_clock::now());
+  const bool minuteChanged = minute != m_lastTickMinute;
+  m_lastTickMinute = minute;
   for (auto& inst : m_instances) {
-    if (inst->surface != nullptr) {
-      inst->surface->requestUpdate();
+    if (inst->surface == nullptr) {
+      continue;
     }
+    if (!minuteChanged && !instanceWantsSecondTicks(*inst)) {
+      continue;
+    }
+    inst->surface->requestUpdate();
   }
 }
 
@@ -2893,6 +2919,8 @@ void Bar::attachWidgetsToSections(BarInstance& instance) {
       run.contentScale = widget->contentScale();
       run.hoverBoxes = std::move(hoverBoxes);
       run.accordion = accordion;
+      run.accordionDurationMs = cap.accordionDurationMs.value_or(static_cast<float>(Style::animNormal));
+      run.accordionDelayMs = cap.accordionDelayMs.value_or(0.0F);
       run.accordionClip = clipPtr;
       run.accordionDirection = cap.accordionDirection;
       run.accordionVisibleIndex = accordionStart ? memberOrder.size() - 1 : 0;
@@ -2959,40 +2987,64 @@ void Bar::animateWidgetHoverHighlight(BarInstance& instance, Widget& widget, boo
   }
 }
 
+void Bar::beginAccordionAnimation(BarInstance& instance, BarCapsuleRun& run, bool expanded) {
+  run.accordionExpanded = expanded;
+  instance.animations.cancelForOwner(run.shell);
+  instance.animations.animate(
+      run.accordionProgress, expanded ? 1.0F : 0.0F, run.accordionDurationMs, Easing::EaseOutCubic,
+      [&run, surface = instance.surface.get()](float progress) {
+        run.accordionProgress = progress;
+        if (surface != nullptr) {
+          surface->requestLayout();
+        }
+      },
+      {}, run.shell
+  );
+}
+
 void Bar::updateAccordionExpansion(BarInstance& instance, InputArea* hoveredArea) {
   Widget* target = widgetFromHoveredArea(instance, hoveredArea);
-
-  auto isPointerInsideRunShell = [&instance](const BarCapsuleRun& run) -> bool {
-    return instance.pointerInside && pointInsideNode(run.shell, instance.lastPointerSx, instance.lastPointerSy);
-  };
 
   bool changed = false;
   auto updateRuns = [&](std::vector<BarCapsuleRun>& runs) {
     for (auto& run : runs) {
       if (!run.accordion || run.shell == nullptr) {
+        run.accordionDelayTimer.stop();
         continue;
       }
-      bool want = target != nullptr && std::ranges::contains(run.widgets, target);
-      if (!want && (run.accordionExpanded || run.accordionProgress > 0.0F)) {
-        if (isPointerInsideRunShell(run)) {
-          want = true;
-        }
-      }
+      const bool want = accordionRunWantsExpansion(instance, run, target);
       if (want == run.accordionExpanded) {
+        run.accordionDelayTimer.stop();
         continue;
       }
-      run.accordionExpanded = want;
-      changed = true;
-      instance.animations.cancelForOwner(run.shell);
-      instance.animations.animate(
-          run.accordionProgress, want ? 1.0F : 0.0F, Style::animNormal, Easing::EaseOutCubic,
-          [&run, surface = instance.surface.get()](float progress) {
-            run.accordionProgress = progress;
-            if (surface != nullptr) {
-              surface->requestLayout();
+      if (!want) {
+        // Collapse stays immediate; a pending expand is void once the pointer leaves.
+        run.accordionDelayTimer.stop();
+        beginAccordionAnimation(instance, run, false);
+        changed = true;
+        continue;
+      }
+      // Expand honors accordion_delay_ms: arm a one-shot and re-verify hover when it fires, so a
+      // pointer that already moved on never unfolds the group.
+      if (run.accordionDelayMs <= 0.0F) {
+        beginAccordionAnimation(instance, run, true);
+        changed = true;
+        continue;
+      }
+      if (run.accordionDelayTimer.active()) {
+        continue;
+      }
+      run.accordionDelayTimer.start(
+          std::chrono::milliseconds(static_cast<int>(run.accordionDelayMs)), [this, &instance, &run]() {
+            const Widget* nowTarget = widgetFromHoveredArea(instance, instance.inputDispatcher.hoveredArea());
+            if (run.accordionExpanded || !accordionRunWantsExpansion(instance, run, nowTarget)) {
+              return;
             }
-          },
-          {}, run.shell
+            beginAccordionAnimation(instance, run, true);
+            if (instance.surface != nullptr) {
+              instance.surface->requestLayout();
+            }
+          }
       );
     }
   };
@@ -3089,6 +3141,22 @@ bool Bar::instanceNeedsFrameTick(const BarInstance& instance) {
   return widgetsNeedFrameTick(instance.startWidgets)
       || widgetsNeedFrameTick(instance.centerWidgets)
       || widgetsNeedFrameTick(instance.endWidgets);
+}
+
+bool Bar::widgetsWantSecondTicks(const std::vector<std::unique_ptr<Widget>>& widgets) {
+  return ::widgetsWantSecondTicks(widgets);
+}
+
+bool Bar::instanceWantsSecondTicks(const BarInstance& instance) {
+  return widgetsWantSecondTicks(instance.startWidgets)
+      || widgetsWantSecondTicks(instance.centerWidgets)
+      || widgetsWantSecondTicks(instance.endWidgets);
+}
+
+bool Bar::wantsSecondTicks() const {
+  return std::ranges::any_of(m_instances, [](const auto& instance) {
+    return instance != nullptr && instanceWantsSecondTicks(*instance);
+  });
 }
 
 void Bar::applyBackgroundPalette(BarInstance& instance) {

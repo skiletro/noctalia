@@ -196,11 +196,11 @@ if not cc.has_header('stb/stb_image_write.h')
   error('stb/stb_image_write.h not found')
 endif
 
-# ── System: libwebp (WebP decode and thumbnail encode; demux for animations) ─
+# ── System: libwebp (WebP decode; thumbnail and screenshot encode; demux for animations) ─
 libwebp_dep       = dependency('libwebp', required: true)
 libwebpdemux_dep  = dependency('libwebpdemux', required: true)
 
-# ── System: libjxl (JPEG XL decode) ───────────────────────────────────────────
+# ── System: libjxl (JPEG XL decode and screenshot encode) ─────────────────────
 libjxl_dep          = dependency('libjxl', required: true)
 libjxl_threads_dep  = dependency('libjxl_threads', required: true)
 
@@ -516,6 +516,8 @@ _noctalia_sources = files(
   'src/idle/plugin_idle_watches.cpp',
   'src/ipc/ipc_client.cpp',
   'src/ipc/ipc_service.cpp',
+  'src/ipc/pixel_stream_client.cpp',
+  'src/ipc/pixel_stream_service.cpp',
   'src/launcher/app_provider.cpp',
   'src/launcher/dmenu_cli.cpp',
   'src/launcher/dmenu_ipc.cpp',
@@ -562,6 +564,7 @@ _noctalia_sources = files(
   'src/render/core/stb_image_resize_impl.cpp',
   'src/render/core/thumbnail_service.cpp',
   'src/render/core/image_decoder.cpp',
+  'src/render/core/heif_library.cpp',
   'src/render/core/image_encoder.cpp',
   'src/render/core/image_orientation.cpp',
   'src/render/programs/glyph_program.cpp',
@@ -907,6 +910,7 @@ _noctalia_sources = files(
   'src/ui/controls/grid_view.cpp',
   'src/ui/controls/grid_tile.cpp',
   'src/ui/controls/image.cpp',
+  'src/ui/controls/pixel_stream_view.cpp',
   'src/ui/controls/lockscreen_transition_cover.cpp',
   'src/ui/controls/input.cpp',
   'src/core/input/keybind_matcher.cpp',
@@ -1011,6 +1015,7 @@ _noctalia_sources = files(
   'src/theme/custom_palettes.cpp',
   'src/theme/fixed_palette.cpp',
   'src/theme/template_apply_service.cpp',
+  'src/theme/gtk_extensions.cpp',
   'src/theme/theme_service.cpp',
   'src/theme/json_output.cpp',
   'src/theme/kde_color_scheme.cpp',
@@ -1151,11 +1156,12 @@ noctalia_exe = executable('noctalia',
 
 install_subdir('assets',
   install_dir: get_option('datadir') / 'noctalia',
-  exclude_files: ['dev.noctalia.Noctalia.desktop'],
+  exclude_files: ['dev.noctalia.Noctalia.desktop', 'dev.noctalia.Noctalia.Annotator.desktop'],
 )
 
 install_data(
   'assets/dev.noctalia.Noctalia.desktop',
+  'assets/dev.noctalia.Noctalia.Annotator.desktop',
   install_dir: get_option('datadir') / 'applications',
 )
 
@@ -1189,6 +1195,7 @@ if build_tests
     'audio_route_selection',
     'battery_health',
     'battery_hook_state',
+    'battery_warning_threshold',
     'bluetooth_uuid_names',
     'button_layout',
     'cairo_text_renderer',
@@ -1236,6 +1243,7 @@ if build_tests
     'google_client_reminders',
     'greeter_appearance_sync',
     'grid_item_cursor',
+    'gtk_extensions',
     'hook_manager',
     'hyprland_workspace_backend',
     'i18n_language_tag',
@@ -1287,9 +1295,11 @@ if build_tests
     'plugin_recommendations',
     'plugin_source_locks',
     'plugin_source_paths',
+    'pixel_stream_client',
     'process',
     'scheme',
     'screenshot_region_badge',
+    'screenshot_ipc_request',
     'scrollbar_geometry',
     'secret_store',
     'security_primitives',
@@ -1445,6 +1455,24 @@ if build_tests
         'sh', bluetooth_property_integration_exe.full_path(),
       ],
       depends: bluetooth_property_integration_exe,
+    )
+  endif
+
+  bluetooth_connect_pass_integration_exe = executable('bluetooth_connect_pass_integration_test',
+    sources: files('tests/bluetooth_connect_pass_integration_test.cpp'),
+    dependencies: noctalia_core_dep,
+    override_options: ['b_ndebug=false'],
+  )
+  if dbus_run_session.found()
+    test('bluetooth_connect_pass_integration',
+      dbus_run_session,
+      args: [
+        '--', 'sh', '-c',
+        'export DBUS_SYSTEM_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS"; exec "$1"',
+        'sh', bluetooth_connect_pass_integration_exe.full_path(),
+      ],
+      depends: bluetooth_connect_pass_integration_exe,
+      timeout: 60,
     )
   endif
 

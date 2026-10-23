@@ -136,10 +136,10 @@ namespace {
 
   [[nodiscard]] float launcherTextStackHeight(Renderer& renderer, const LauncherListStyle& style) {
     const float bodySize = Style::fontSizeBody * style.scale;
-    float textHeight = stableLabelHeight(renderer.measureFont(bodySize, FontWeight::SemiBold));
+    float textHeight = stableLabelHeight(renderer.measureFont(bodySize, {FontWeight::SemiBold}));
     if (!style.compact) {
       const float captionSize = Style::fontSizeCaption * style.scale;
-      textHeight += stableLabelHeight(renderer.measureFont(captionSize, FontWeight::Normal));
+      textHeight += stableLabelHeight(renderer.measureFont(captionSize, {FontWeight::Normal}));
     }
     return textHeight;
   }
@@ -167,10 +167,10 @@ namespace {
   [[nodiscard]] float launcherAppGridLabelHeight(Renderer& renderer, const LauncherListStyle& style, float wrapWidth) {
     const float fontSize = Style::fontSizeCaption * style.scale;
     const TextMetrics metrics =
-        renderer.measureText("Ag\nyg", fontSize, FontWeight::Normal, wrapWidth, 2, TextAlign::Center);
+        renderer.measureText("Ag\nyg", fontSize, {FontWeight::Normal}, wrapWidth, 2, TextAlign::Center);
     const float actualHeight = metrics.bottom - metrics.top;
     const float inkSpan = std::max(0.0F, metrics.inkBottom - metrics.inkTop);
-    const float rowExtent = renderer.fontRowExtent(fontSize, FontWeight::Normal);
+    const float rowExtent = renderer.fontRowExtent(fontSize, {FontWeight::Normal});
     return std::ceil(std::max({actualHeight, inkSpan, rowExtent * 2.0F}));
   }
 
@@ -1357,7 +1357,7 @@ public:
     }
     if (m_rows[index].kind == LauncherSectionRowData::Kind::Header) {
       const float textHeight =
-          stableLabelHeight(renderer.measureFont(Style::fontSizeBody * m_style.scale, FontWeight::SemiBold));
+          stableLabelHeight(renderer.measureFont(Style::fontSizeBody * m_style.scale, {FontWeight::SemiBold}));
       return std::ceil(std::max(Style::fontSizeTitle * m_style.scale, textHeight) + Style::spaceSm * m_style.scale);
     }
 
@@ -1448,7 +1448,9 @@ void LauncherPanel::applyProviderConfig(LauncherProvider& provider) const {
   }
 }
 
-void LauncherPanel::finishActivation(LauncherProvider& provider, const std::string& resultId, bool copied) {
+void LauncherPanel::finishActivation(
+    LauncherProvider& provider, const std::string& resultId, bool copied, bool appLaunch
+) {
   const bool trackUsage = m_config == nullptr || m_config->config().shell.launcher.trackUsage;
   if (trackUsage && provider.trackUsage()) {
     m_usageTracker.record(provider.id(), resultId);
@@ -1456,6 +1458,9 @@ void LauncherPanel::finishActivation(LauncherProvider& provider, const std::stri
   PanelManager::instance().closePanel(false);
   if (copied && provider.supportsAutoPaste() && m_onCopiedActivation) {
     m_onCopiedActivation();
+  }
+  if (appLaunch && m_onAppLaunch) {
+    m_onAppLaunch();
   }
 }
 
@@ -3451,7 +3456,7 @@ bool LauncherPanel::openAppActionsMenu(std::size_t index, float anchorX, float a
       if (!provider->activate(result)) {
         return;
       }
-      finishActivation(*provider, result.id, provider->supportsAutoPaste());
+      finishActivation(*provider, result.id, provider->supportsAutoPaste(), !result.desktopEntryPath.empty());
       return;
     }
     return;
@@ -3525,7 +3530,7 @@ void LauncherPanel::activateSelected() {
       return;
     }
 
-    finishActivation(*provider, result.id, provider->supportsAutoPaste());
+    finishActivation(*provider, result.id, provider->supportsAutoPaste(), !result.desktopEntryPath.empty());
     return;
   }
 }

@@ -41,12 +41,13 @@
       "copy": "Copy the annotated image (Ctrl+C)",
       "cursor": "Show the pointer captured with the screen (p)",
       "cursor-capture-failed": "Pointer toggle unavailable: the compositor could not provide a separate cursor image",
-      "cursor-live": "Freeze the screen first to change the captured pointer (F)",
+      "cursor-live": "Freeze the screen first to change the captured pointer (Z)",
       "cursor-not-captured": "Pointer toggle unavailable: this compositor does not support separate cursor capture",
       "done": "Apply the screenshot settings (Enter)",
-      "fill-off": "Shape fill: off",
-      "fill-on": "Shape fill: on",
-      "freeze": "Freeze the screen under the ink (f)",
+      "fill-off": "Shape fill: off (f)",
+      "fill-opaque": "Shape fill: opaque (f)",
+      "fill-semi": "Shape fill: semi-transparent (f)",
+      "freeze": "Freeze the screen under the ink (z)",
       "move-toolbar": "Drag to move the toolbar",
       "redo": "Redo (Ctrl+Shift+Z)",
       "save": "Save the annotated image (Ctrl+S)",
@@ -318,7 +319,8 @@
       "active-player": "Active player",
       "nothing-playing": "Nothing Playing",
       "now-playing": "Now Playing",
-      "start-playback": "Start playback in an MPRIS app"
+      "start-playback": "Start playback in an MPRIS app",
+      "toggle-visualizer": "Toggle visualizer"
     },
     "network": {
       "anonymous-identity": "Anonymous identity (optional)",
@@ -1060,6 +1062,8 @@
     "calendar-accounts": {
       "add-title": "Add Calendar Account",
       "calendars-label": "Calendars",
+      "client-cert-label": "Client Certificate (PEM)",
+      "client-key-label": "Client Key (PEM)",
       "color-label": "Color",
       "credential-source-file": "Password file",
       "credential-source-keyring": "Keyring",
@@ -1161,9 +1165,13 @@
         },
         "group": {
           "accordion": "Accordion",
+          "accordion-delay": "Unfold Delay",
+          "accordion-delay-description": "Milliseconds to hover before the group starts unfolding (0 reacts at once)",
           "accordion-description": "Show only the first widget; hovering the capsule reveals the rest",
-          "accordion-direction": "Reveal direction",
+          "accordion-direction": "Reveal Direction",
           "accordion-direction-description": "Side of the first widget where the hidden widgets unfold",
+          "accordion-duration": "Unfold Time",
+          "accordion-duration-description": "Milliseconds the group takes to unfold on hover (0 is instant)",
           "action": "Group",
           "border": "Border",
           "border-description": "Capsule outline color role; leave on Default for no outline",
@@ -1352,6 +1360,7 @@
         "background": "Background",
         "battery": "Battery",
         "behavior": "Behavior",
+        "bluetooth": "Bluetooth",
         "borders": "Borders",
         "brightness": "Brightness",
         "built-in": "Built-In",
@@ -1594,6 +1603,12 @@
         "top-right": "Top Right"
       },
       "screenshot": {
+        "format": {
+          "jpeg": "JPEG",
+          "jxl": "JPEG XL",
+          "png": "PNG",
+          "webp": "WebP"
+        },
         "region-modifier": {
           "alt": "Alt",
           "ctrl": "Ctrl",
@@ -2649,6 +2664,10 @@
           "description": "Gap in pixels between a floating or detached panel and the bar edge",
           "label": "Floating Offset"
         },
+        "home-circular-avatar": {
+          "description": "Use a circular avatar; disable to follow the shell's corner roundness",
+          "label": "Circular Avatar"
+        },
         "home-session-button": {
           "description": "Show the session-actions button in the Home tab header",
           "label": "Show Header Session Button"
@@ -2908,6 +2927,10 @@
         "audio-overdrive": {
           "description": "Allow volume above 100%",
           "label": "Audio Overdrive"
+        },
+        "bluetooth-connect-when-enabled": {
+          "description": "Connect paired, trusted devices when Bluetooth turns on, at startup, and after resume",
+          "label": "Connect Devices When Bluetooth Turns On"
         },
         "calendar": {
           "description": "Show events from your online calendar accounts",
@@ -3284,6 +3307,10 @@
           "label": "Custom App Launch Command",
           "placeholder": "$CMD"
         },
+        "niri-overview-close-on-launch": {
+          "description": "Close the overview when an app launches from the launcher while the niri overview is open",
+          "label": "Close on Launch"
+        },
         "niri-overview-type-to-launch": {
           "description": "Open the launcher when typing in niri overview; uses a tiny keyboard-focus surface while overview is open",
           "label": "Type to Launch"
@@ -3466,13 +3493,17 @@
           "label": "Copy to Clipboard"
         },
         "screenshot-directory": {
-          "description": "Folder for saved PNG files; leave empty to use the standard XDG Pictures directory",
+          "description": "Folder for saved screenshot files; leave empty to use the standard XDG Pictures directory",
           "label": "Output Directory",
           "placeholder": "XDG Pictures directory"
         },
         "screenshot-filename-pattern": {
-          "description": "strftime pattern without extension (.png is added); use %s for unix epoch",
+          "description": "strftime pattern without extension (the format's extension is added); use %s for unix epoch",
           "label": "Filename Pattern"
+        },
+        "screenshot-format": {
+          "description": "File format for saved screenshots; clipboard copies and pipe commands always receive PNG",
+          "label": "File Format"
         },
         "screenshot-freeze-screen": {
           "description": "Capture the desktop before region selection so moving content stays still",
@@ -3490,6 +3521,18 @@
           "description": "Send the captured PNG to a shell command on stdin",
           "label": "Pipe to Command"
         },
+        "screenshot-quality": {
+          "description": "Compression quality for JPEG, WebP, and JPEG XL files; 100 saves WebP and JPEG XL losslessly",
+          "label": "Quality"
+        },
+        "screenshot-region-border-width": {
+          "description": "Width of the border around the selected region",
+          "label": "Region Border Width"
+        },
+        "screenshot-region-dim-opacity": {
+          "description": "Opacity of the darkened area around the selected region",
+          "label": "Region Dim Opacity"
+        },
         "screenshot-region-modifier": {
           "description": "Modifier to move or resize a selected region: left-drag to move, right-drag to resize from the outer thirds (corners resize both axes). None (default) keeps the plain drag-to-adjust behavior",
           "label": "Move/Resize Modifier"
@@ -3499,12 +3542,20 @@
           "label": "Remember Last Region"
         },
         "screenshot-save-to-file": {
-          "description": "Write screenshots as PNG files to the output directory",
+          "description": "Write screenshots to the output directory in the chosen file format",
           "label": "Save to File"
         },
         "screenshot-show-cursor": {
           "description": "Include the mouse pointer in screenshots",
           "label": "Show Cursor"
+        },
+        "screenshot-show-region-dimensions": {
+          "description": "Show the size badge while resizing or moving a region",
+          "label": "Show Region Dimensions"
+        },
+        "screenshot-show-region-hint": {
+          "description": "Show the confirm hint with keybinds (Copy, Save, Cancel) while confirming a region",
+          "label": "Show Region Hint"
         },
         "screenshot-skip-annotate-on-copy-save": {
           "description": "Copy and Save in the region overlay deliver immediately; Enter and Space still open the editor",
@@ -3538,6 +3589,10 @@
         "umbriel-audio-provider": {
           "description": "Share the audio spectrum with Umbriel effects, even without a visualizer widget",
           "label": "Provide Audio to Umbriel"
+        },
+        "umbriel-overview-close-on-launch": {
+          "description": "Close the overview when an app launches from the launcher while the umbriel overview is open",
+          "label": "Close on Launch"
         },
         "umbriel-overview-type-to-launch": {
           "description": "Open the launcher when typing in umbriel overview; uses a tiny keyboard-focus surface while overview is open",
@@ -3741,7 +3796,7 @@
         "command-placeholder": "Shell command",
         "commands": {
           "annotate": {
-            "description": "Draw on the screen over running apps; press F or the Freeze button to capture the background",
+            "description": "Draw on the screen over running apps; press Z or the Freeze button to capture the background",
             "label": "Annotate screen"
           },
           "bar-auto-hide-set": {
@@ -4322,7 +4377,7 @@
           "workspaces-description": "Minimum active workspace pill length along the bar, as a multiple of pill thickness; labels may expand beyond this"
         },
         "album-art-only": {
-          "description": "Show only the circular album artwork without the track title",
+          "description": "Show only the album artwork without the track title",
           "label": "Album Art Only"
         },
         "anchor": {
@@ -4730,7 +4785,7 @@
           "label": "Reversed"
         },
         "rotate-album-art": {
-          "description": "Rotate the circular album artwork while media is playing",
+          "description": "Rotate the album artwork while media is playing",
           "label": "Rotate Album Art"
         },
         "scale": {

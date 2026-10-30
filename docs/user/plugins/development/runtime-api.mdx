@@ -246,7 +246,7 @@ Shell operators such as pipes, redirections, variable expansion, and command sub
 | ----------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `noctalia.readFile(path)`           | string, or `nil, err` | Reads a file as bytes.                                                                                                               |
 | `noctalia.readFileAsync(path, cb)`  | bool                  | Queues a read and calls `cb(contents, nil)` or `cb(nil, err)`. Returns `false` if the bounded queue is full. Requires plugin API 23. |
-| `noctalia.writeFile(path, content)` | bool, optional error  | Writes a file, replacing existing contents.                                                                                          |
+| `noctalia.writeFile(path, content)` | bool, optional error  | Writes a file, replacing existing contents. New files are created owner-only (`0600`); an existing file keeps its mode.              |
 | `noctalia.mkdirAll(path)`           | bool, optional error  | Creates a directory and any missing parents (an existing directory is success).                                                      |
 | `noctalia.removeFile(path)`         | bool, optional error  | Deletes a file. Refuses directories.                                                                                                 |
 | `noctalia.renameFile(from, to)`     | bool, optional error  | Renames or moves a file.                                                                                                             |
@@ -254,7 +254,7 @@ Shell operators such as pipes, redirections, variable expansion, and command sub
 | `noctalia.fileInfo(path)`           | table, or `nil, err`  | `{ size, mtime, isDir }`, size in bytes, mtime in unix seconds.                                                                      |
 | `noctalia.listDir(path)`            | array, or `nil, err`  | Lists filenames in a directory.                                                                                                      |
 | `noctalia.pluginDir()`              | string or `nil`       | Returns this plugin's runtime directory.                                                                                             |
-| `noctalia.pluginDataDir()`          | string, or `nil, err` | Returns this plugin's persistent data directory, creating it on demand.                                                              |
+| `noctalia.pluginDataDir()`          | string, or `nil, err` | Returns this plugin's persistent data directory, creating it on demand and restricting it to the owner (`0700`).                     |
 | `noctalia.loadFont(path)`           | string, or `nil, err` | Registers a font file and returns its family name.                                                                                   |
 
 Filesystem paths resolve as follows: `~` expands to `$HOME`, absolute paths are used as-is, and relative paths resolve against the plugin's own directory. Plugins are trusted code, so these helpers are not sandboxed.
@@ -319,6 +319,28 @@ Watches use the compositor's idle notification (`ext-idle-notify-v1`) and work f
 By default a watch honors idle inhibitors: apps holding a Wayland idle inhibitor, Noctalia's caffeine, and D-Bus `org.freedesktop.ScreenSaver` inhibits (for example browser video). If a D-Bus inhibit starts while the watch reports idle, it reports `false`; when the inhibit lifts, the timeout restarts. Pass `{ ignoreInhibitors = true }` to count only real user input (`ext-idle-notify` v2). On compositors with only v1 this falls back to honoring inhibitors and logs a warning once.
 
 Watching never changes the `[idle]` behaviors (lock, screen off, suspend).
+
+## Umbriel
+
+| Method                                                                                    | Returns | Description                                                                                                                   |
+| ----------------------------------------------------------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `noctalia.umbriel.action(request: table, callback: ((ok: boolean, err: string?) -> ())?)` | boolean | Sends one action to the running Umbriel compositor over its IPC socket. Requires <PluginApiBadge feature="umbriel-action" />. |
+
+`request` is the typed action request from Umbriel's [IPC reference](/umbriel/ipc/) without `cmd`: an `action` name plus one field per argument. Noctalia adds `cmd = "action"`; a table that sets `cmd` itself, or has no non-empty `action` string, is a Lua error. Umbriel validates the fields and rejects unknown, missing, or mistyped ones.
+
+The call returns `false` without sending anything when no Umbriel socket is found: `UMBRIEL_SOCKET` is unset and `$XDG_RUNTIME_DIR/umbriel-$WAYLAND_DISPLAY.sock` does not exist. Otherwise it returns `true` and sends the request off the script thread. `callback(true, nil)` follows when Umbriel accepts the action, and `callback(false, err)` when it rejects it, the socket cannot be reached, or no reply arrives within two seconds. Without a callback the action is fire-and-forget. At most 16 callbacks may be pending in one runtime.
+
+Prefer it over `runAsync({ "umbriel", "msg", ... })`: it starts no process, does not need `umbriel` on `PATH`, and passes arguments as typed values instead of words.
+
+```lua
+noctalia.umbriel.action({ action = "workspace-set-layout", layout = "dwindle" }, function(ok, err)
+  if not ok then
+    noctalia.notifyError("Layout change failed", err)
+  end
+end)
+
+noctalia.umbriel.action({ action = "workspace-switch", workspace = "WEB", output = "DP-1" })
+```
 
 ## Layers
 

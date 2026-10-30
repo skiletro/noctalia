@@ -231,6 +231,7 @@ namespace scripting {
     AsyncHttpResult,
     SoundLoadResult,
     ColorPickerResult,
+    UmbrielActionResult,
     StateWatchResult,
     IdleWatchResult,
     StreamLine,
@@ -297,6 +298,8 @@ namespace scripting {
     std::string soundLoadError;
     // ColorPickerResult payload (nil on cancellation).
     std::optional<std::string> colorPickerResult;
+    // UmbrielActionResult payload (nullopt when the action was accepted).
+    std::optional<std::string> umbrielActionError;
     // StateWatchResult payload (the changed value as JSON).
     std::string stateJson;
     // IdleWatchResult payload: true on idled, false on resumed.

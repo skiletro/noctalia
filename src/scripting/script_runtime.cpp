@@ -285,7 +285,7 @@ namespace scripting {
       }
 
       auto self = shared_from_this();
-      DeferredCall::callLater([self, id, replay = std::move(replay)]() mutable {
+      DeferredCall::callLater([self, id, replay = std::move(replay)] mutable {
         ScriptResultCallback subscriber;
         {
           std::scoped_lock replayLock(self->mutex);
@@ -514,6 +514,16 @@ namespace scripting {
       (void)enqueue(std::move(event));
     }
 
+    void enqueueUmbrielActionResult(std::uint64_t hostId, int callbackRef, std::optional<std::string> error) {
+      ScriptEvent event;
+      event.kind = ScriptEventKind::UmbrielActionResult;
+      event.hostId = hostId;
+      event.callbackRef = callbackRef;
+      event.umbrielActionError = std::move(error);
+      event.budget = kCallBudget;
+      (void)enqueue(std::move(event));
+    }
+
     void enqueueStateWatchResult(int callbackRef, std::string json) {
       ScriptEvent event;
       event.kind = ScriptEventKind::StateWatchResult;
@@ -673,6 +683,15 @@ namespace scripting {
         return collectResult(event, "color picker callback", ok);
       }
 
+      if (event.kind == ScriptEventKind::UmbrielActionResult) {
+        if (event.hostId != host->hostId() || !host->hasUmbrielActionCallback(event.callbackRef)) {
+          return std::nullopt;
+        }
+        bindingContext.beginCall(event.snapshot);
+        const bool ok = host->callUmbrielActionCallback(event.callbackRef, event.umbrielActionError, event.budget);
+        return collectResult(event, "umbriel action callback", ok);
+      }
+
       if (event.kind == ScriptEventKind::StateWatchResult) {
         if (!host->hasStateWatchCallback(event.callbackRef)) {
           return std::nullopt;
@@ -781,7 +800,7 @@ namespace scripting {
       std::weak_ptr<State> weak = shared_from_this();
       const std::string pluginId = runtimeName.substr(0, runtimeName.find(':'));
       const std::uint64_t token = stateToken;
-      host->setStateWatchHandler([weak, pluginId, token](std::string key, int callbackRef) {
+      host->setStateWatchHandler([weak, pluginId, token](const std::string& key, int callbackRef) {
         PluginStateStore::instance().watch(pluginId, key, token, [weak, callbackRef](const std::string& json) {
           if (auto state = weak.lock()) {
             state->enqueueStateWatchResult(callbackRef, json);
@@ -816,6 +835,13 @@ namespace scripting {
           [weak](std::uint64_t hostId, int callbackRef, std::optional<std::string> color) {
             if (auto state = weak.lock()) {
               state->enqueueColorPickerResult(hostId, callbackRef, std::move(color));
+            }
+          }
+      );
+      host->setUmbrielActionResultHandler(
+          [weak](std::uint64_t hostId, int callbackRef, std::optional<std::string> error) {
+            if (auto state = weak.lock()) {
+              state->enqueueUmbrielActionResult(hostId, callbackRef, std::move(error));
             }
           }
       );
@@ -999,7 +1025,7 @@ namespace scripting {
 
     void postResult(ScriptResult result) {
       auto self = shared_from_this();
-      DeferredCall::callLater([self, result = std::move(result)]() mutable { self->deliverResult(std::move(result)); });
+      DeferredCall::callLater([self, result = std::move(result)] mutable { self->deliverResult(std::move(result)); });
     }
 
     void deliverResult(ScriptResult result) {

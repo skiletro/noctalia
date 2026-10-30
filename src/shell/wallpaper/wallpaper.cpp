@@ -27,10 +27,10 @@
 #include "wayland/wayland_seat.h"
 
 #include <algorithm>
-#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <string_view>
 #include <system_error>
@@ -277,15 +277,19 @@ namespace {
 
     kLog.info("syncing wallpaper to KDE Plasma: {} (connector: {})", imagePath, connector);
 
+    // An ASCII-only JSON string is a valid JS literal: quotes cannot end it, and U+2028/U+2029 (raw line
+    // terminators to Plasma's JS engine) are escaped.
+    const std::string imageUrl =
+        nlohmann::json("file://" + imagePath).dump(-1, ' ', true, nlohmann::json::error_handler_t::replace);
     std::string script;
     if (output == nullptr) {
       script = "var d = desktops();"
                "for (var i = 0; i < d.length; i++) {"
                "  d[i].wallpaperPlugin = 'org.kde.image';"
                "  d[i].currentConfigGroup = ['Wallpaper', 'org.kde.image', 'General'];"
-               "  d[i].writeConfig('Image', 'file://"
-          + imagePath
-          + "');"
+               "  d[i].writeConfig('Image', "
+          + imageUrl
+          + ");"
             "}";
     } else {
       script = "var d = desktops();"
@@ -302,9 +306,9 @@ namespace {
           + ") {"
             "    d[i].wallpaperPlugin = 'org.kde.image';"
             "    d[i].currentConfigGroup = ['Wallpaper', 'org.kde.image', 'General'];"
-            "    d[i].writeConfig('Image', 'file://"
-          + imagePath
-          + "');"
+            "    d[i].writeConfig('Image', "
+          + imageUrl
+          + ");"
             "  }"
             "}";
     }
@@ -417,7 +421,7 @@ bool Wallpaper::initialize(
   m_themeService = themeService;
 
   // Register reload callback unconditionally so toggling enabled in config works.
-  m_config->addReloadCallback([this]() { reload(); }, "wallpaper");
+  m_config->addReloadCallback([this] { reload(); }, "wallpaper");
   m_paletteConn = paletteChanged().connect([this] {
     for (auto& inst : m_instances) {
       updateRendererState(*inst);
@@ -826,7 +830,7 @@ void Wallpaper::syncInstances() {
 
   // Remove instances for outputs that no longer exist or are now disabled by monitor override
   std::erase_if(m_instances, [&](const auto& inst) {
-    const auto* output = [&]() -> const WaylandOutput* {
+    const auto* output = [&] -> const WaylandOutput* {
       for (const auto& out : outputs) {
         if (out.name == inst->outputName)
           return &out;
@@ -1180,8 +1184,7 @@ Wallpaper::SwitchOutcome Wallpaper::switchWallpaperTo(PickWallpaper action, std:
       return SwitchOutcome::Unavailable;
     }
     const std::string currentPath = m_config->getWallpaperPath(std::string(*connector));
-    const std::string picked =
-        pick(std::move(candidates), currentPath, outputShuffleScope(std::string(*connector)), dir);
+    const std::string picked = pick(std::move(candidates), currentPath, outputShuffleScope(*connector), dir);
     if (picked.empty() || picked == currentPath) {
       return SwitchOutcome::NoChange;
     }
@@ -1304,7 +1307,7 @@ void Wallpaper::createInstance(const WaylandOutput& output) {
 
   instance->surface->setAnimationManager(&instance->animations);
 
-  instance->surface->setUpdateCallback([this, inst]() { updateRendererState(*inst); });
+  instance->surface->setUpdateCallback([this, inst] { updateRendererState(*inst); });
 
   if (!instance->surface->initialize(output.output)) {
     kLog.warn("failed to initialize surface for output {}", output.name);
@@ -1370,7 +1373,7 @@ void Wallpaper::loadWallpaper(WallpaperInstance& instance, const std::string& pa
     image = m_textureCache->acquire(
         SharedTextureRequest{.path = path, .coverage = textureCoverage(instance)},
         m_renderContext != nullptr ? &m_renderContext->backend() : nullptr,
-        [this, inst = &instance]() { onImageChanged(*inst); }
+        [this, inst = &instance] { onImageChanged(*inst); }
     );
   }
   if (image.empty() || image.failed()) {
@@ -1516,7 +1519,7 @@ void Wallpaper::startTransitionAnimation(
   // animations-enabled toggle (disabling animations must not skip the crossfade).
   instance.transitionAnimId = instance.animations.animateTimer(
       fromTime, toTime, durationMs, Easing::Linear, [inst](float time) { setTransitionTime(*inst, time); },
-      [this, inst]() { finishTransition(*inst); }
+      [this, inst] { finishTransition(*inst); }
   );
 
   updateRendererState(instance);

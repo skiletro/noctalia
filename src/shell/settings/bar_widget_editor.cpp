@@ -5,21 +5,21 @@
 #include "config/schema/config_schema.h"
 #include "config/schema/engine.h"
 #include "config/schema/ranges.h"
-#include "core/files/directory_scanner.h"
 #include "cursor-shape-v1-client-protocol.h"
 #include "i18n/i18n.h"
 #include "render/scene/node.h"
 #include "shell/bar/widget_gesture.h"
 #include "shell/bar/widget_gesture_defaults.h"
+#include "shell/dialogs/file_dialog.h"
+#include "shell/dialogs/glyph_picker_dialog.h"
 #include "shell/settings/color_spec_picker.h"
 #include "shell/settings/font_weight_catalog.h"
 #include "shell/settings/path_browse.h"
 #include "shell/settings/settings_content.h"
 #include "shell/settings/widget_settings_registry.h"
+#include "system/directory_scanner.h"
 #include "ui/builders.h"
 #include "ui/controls/collapsible.h"
-#include "ui/dialogs/file_dialog.h"
-#include "ui/dialogs/glyph_picker_dialog.h"
 #include "ui/palette.h"
 #include "ui/style.h"
 
@@ -45,8 +45,8 @@
 namespace settings {
 
   // Defined in settings_content_common.cpp (header not included here to avoid a makeLabel overload clash).
-  [[nodiscard]] std::string formatSliderValue(double value, bool integerValue);
-  [[nodiscard]] std::optional<double> parseDoubleInput(std::string_view text);
+  std::string formatSliderValue(double value, bool integerValue);
+  std::optional<double> parseDoubleInput(std::string_view text);
 
   namespace {
 
@@ -976,7 +976,7 @@ namespace settings {
       return spec.schema.defaultValue;
     }
 
-    [[nodiscard]] bool isBarHorizontal(const Config& cfg, std::string_view barName) {
+    bool isBarHorizontal(const Config& cfg, std::string_view barName) {
       const BarConfig* bar = findBar(cfg, barName);
       if (bar == nullptr) {
         return true;
@@ -1083,6 +1083,9 @@ namespace settings {
         std::vector<WidgetSettingSpec>& specs, const Config& cfg, const std::vector<std::string>& lanePath
     ) {
       for (auto& spec : specs) {
+        if (spec.defaultFromConfig) {
+          spec.schema.defaultValue = spec.defaultFromConfig(cfg);
+        }
         if (!spec.schema.inheritsFromBar) {
           continue;
         }
@@ -1250,8 +1253,8 @@ namespace settings {
       return selectSetting;
     }
 
-    SelectSetting
-    sourcedSelectSetting(const BarWidgetEditorContext& ctx, const WidgetSettingSpec& spec, std::string selectedValue) {
+    // Static options from the spec followed by the options of its dynamic source.
+    std::vector<SelectOption> specOptions(const BarWidgetEditorContext& ctx, const WidgetSettingSpec& spec) {
       std::vector<SelectOption> options;
       const auto appendUnique = [&](SelectOption option) {
         if (!std::ranges::contains(options, option.value, &SelectOption::value)) {
@@ -1273,6 +1276,9 @@ namespace settings {
       case WidgetSettingOptionSource::BatteryDevices:
         sourcedOptions = ctx.batteryDeviceOptions;
         break;
+      case WidgetSettingOptionSource::Outputs:
+        sourcedOptions = ctx.availableOutputs;
+        break;
       case WidgetSettingOptionSource::Static:
         break;
       }
@@ -1280,6 +1286,12 @@ namespace settings {
       for (auto& option : sourcedOptions) {
         appendUnique(std::move(option));
       }
+      return options;
+    }
+
+    SelectSetting
+    sourcedSelectSetting(const BarWidgetEditorContext& ctx, const WidgetSettingSpec& spec, std::string selectedValue) {
+      std::vector<SelectOption> options = specOptions(ctx, spec);
 
       const auto hasEmptyOption = std::ranges::contains(options, std::string_view{}, &SelectOption::value);
       if (selectedValue.empty() && !hasEmptyOption) {
@@ -1667,7 +1679,10 @@ namespace settings {
           ctx.makeRow(*panel, entry, makeGlyphTextControl(settingValueAsString(value)));
           break;
         case WidgetControlKind::StringList:
-          ctx.makeListBlock(*panel, entry, ListSetting{.items = settingValueAsStringList(value)});
+          ctx.makeListBlock(
+              *panel, entry,
+              ListSetting{.items = settingValueAsStringList(value), .suggestedOptions = specOptions(ctx, spec)}
+          );
           break;
         case WidgetControlKind::StringMap: {
           // Gesture bindings have a closed key set, so they get one fixed row per gesture rather
@@ -2491,7 +2506,7 @@ namespace settings {
         ctx.makeRow(
             *panelPtr, groupEntry("accordion-duration"),
             makeGroupSliderControl(
-                ctx, static_cast<double>(style.accordionDurationMs.value_or(Style::animNormal)), accordionMsMin,
+                ctx, static_cast<double>(style.accordionDurationMs.value_or(kBarRevealDurationMs)), accordionMsMin,
                 accordionMsMax, accordionMsStep, true, [mutateGroup](double v) {
                   mutateGroup([&](BarCapsuleGroupStyle& g) { g.accordionDurationMs = static_cast<std::int32_t>(v); });
                 }
@@ -2500,8 +2515,8 @@ namespace settings {
         ctx.makeRow(
             *panelPtr, groupEntry("accordion-delay"),
             makeGroupSliderControl(
-                ctx, static_cast<double>(style.accordionDelayMs.value_or(0)), accordionMsMin, accordionMsMax,
-                accordionMsStep, true, [mutateGroup](double v) {
+                ctx, static_cast<double>(style.accordionDelayMs.value_or(kBarRevealDelayMs)), accordionMsMin,
+                accordionMsMax, accordionMsStep, true, [mutateGroup](double v) {
                   mutateGroup([&](BarCapsuleGroupStyle& g) { g.accordionDelayMs = static_cast<std::int32_t>(v); });
                 }
             )

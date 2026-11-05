@@ -4,7 +4,7 @@
 #include "compositors/umbriel/umbriel_runtime.h"
 #include "core/deferred_call.h"
 #include "core/log.h"
-#include "core/process/process.h"
+#include "launcher/fuzzy_match.h"
 #include "lua.h"
 #include "luacode.h"
 #include "lualib.h"
@@ -14,21 +14,22 @@
 #include "render/text/font_registry.h"
 #include "scripting/plugin_bindings.h"
 #include "scripting/plugin_id.h"
+#include "scripting/plugin_source_paths.h"
 #include "scripting/plugin_state_store.h"
 #include "scripting/script_api_context.h"
 #include "scripting/script_io_pool.h"
 #include "scripting/ui_handler_table.h"
+#include "shell/dialogs/color_picker_dialog.h"
 #include "system/app_identity.h"
 #include "system/desktop_entry.h"
 #include "system/disk_mounts.h"
 #include "system/icon_resolver.h"
+#include "system/process.h"
 #include "system/system_monitor_service.h"
 #include "system/terminal_launch.h"
 #include "time/time_format.h"
-#include "ui/dialogs/color_picker_dialog.h"
 #include "ui/palette.h"
 #include "util/file_utils.h"
-#include "util/fuzzy_match.h"
 #include "util/string_utils.h"
 
 #include <algorithm>
@@ -412,7 +413,7 @@ namespace {
   // The host's system monitor, or nullptr when it is unavailable: either it failed to construct or
   // [system.monitor] is disabled, in which case latest() would serve zeros that a plugin could not
   // tell apart from a real idle reading.
-  [[nodiscard]] SystemMonitorService* runningMonitorForState(lua_State* L) {
+  SystemMonitorService* runningMonitorForState(lua_State* L) {
     auto* host = hostForState(L);
     if (host == nullptr) {
       return nullptr;
@@ -434,8 +435,8 @@ namespace {
   //     loadAvg = { 1.2, 0.9, 0.7 } }
   //
   // Percentages are 0-100. Absent sensors are nil rather than 0. The first call opts the host
-  // into the optional CPU/GPU probes represented by this snapshot. Per-core and disk sampling
-  // remain opt-in through cpuCores() and diskStats().
+  // into CPU temperature sampling only. GPU sampling requires setGpuMonitoring(true): reading
+  // CPU, RAM or network stats must not keep a discrete GPU's monitoring session alive.
   int luau_systemStats(lua_State* L) {
     auto* monitor = runningMonitorForState(L);
     if (monitor == nullptr) {
@@ -505,6 +506,13 @@ namespace {
     lua_rawseti(L, -2, 3);
     lua_setfield(L, -2, "loadAvg");
 
+    return 1;
+  }
+
+  int luau_setGpuMonitoring(lua_State* L) {
+    luaL_checktype(L, 1, LUA_TBOOLEAN);
+    auto* host = hostForState(L);
+    lua_pushboolean(L, host != nullptr && host->setGpuMonitoring(lua_toboolean(L, 1) != 0));
     return 1;
   }
 
@@ -710,6 +718,9 @@ namespace {
     size_t len = 0;
     const char* path = luaL_checklstring(L, 1, &len);
     auto* host = hostForState(L);
+    if (host != nullptr) {
+      host->recordSettingRead(std::string_view(path, len));
+    }
     const auto snapshot = host != nullptr ? host->api().configSnapshot() : nullptr;
     if (snapshot == nullptr) {
       lua_pushnil(L);
@@ -1394,7 +1405,7 @@ namespace {
       lua_pushstring(L, "no host");
       return 2;
     }
-    const std::string dir = FileUtils::pluginDataDir(host->pluginId());
+    const std::string dir = scripting::plugin_paths::pluginDataDir(host->pluginId());
     if (dir.empty()) {
       lua_pushnil(L);
       lua_pushstring(L, "no state directory");
@@ -2127,6 +2138,7 @@ namespace {
       {"focusedOutputName", luau_focusedOutputName},
       {"outputs", luau_outputs},
       {"systemStats", luau_systemStats},
+      {"setGpuMonitoring", luau_setGpuMonitoring},
       {"cpuCores", luau_cpuCores},
       {"diskMounts", luau_diskMounts},
       {"diskStats", luau_diskStats},
@@ -2280,10 +2292,28 @@ void LuauHost::ensureSystemStatsRetained() {
     return;
   }
   monitor->retainCpuTemp();
-  monitor->retainGpuTemp();
-  monitor->retainGpuUsage();
-  monitor->retainGpuVram();
   m_systemStatsRetained = true;
+}
+
+bool LuauHost::setGpuMonitoring(bool enabled) {
+  if (enabled == m_gpuStatsRetained) {
+    return true;
+  }
+  auto* monitor = m_api.systemMonitor();
+  if (monitor == nullptr) {
+    return false;
+  }
+  if (enabled) {
+    monitor->retainGpuTemp();
+    monitor->retainGpuUsage();
+    monitor->retainGpuVram();
+  } else {
+    monitor->releaseGpuTemp();
+    monitor->releaseGpuUsage();
+    monitor->releaseGpuVram();
+  }
+  m_gpuStatsRetained = enabled;
+  return true;
 }
 
 void LuauHost::ensureCpuCoresRetained() {
@@ -2326,12 +2356,10 @@ LuauHost::~LuauHost() {
   if (m_systemStatsRetained) {
     if (auto* monitor = m_api.systemMonitor(); monitor != nullptr) {
       monitor->releaseCpuTemp();
-      monitor->releaseGpuTemp();
-      monitor->releaseGpuUsage();
-      monitor->releaseGpuVram();
     }
     m_systemStatsRetained = false;
   }
+  setGpuMonitoring(false);
   if (!m_diskPathsRetained.empty()) {
     if (auto* monitor = m_api.systemMonitor(); monitor != nullptr) {
       for (const auto& path : m_diskPathsRetained) {

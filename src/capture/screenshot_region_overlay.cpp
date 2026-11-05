@@ -17,6 +17,7 @@
 #include "render/scene/input_area.h"
 #include "render/scene/input_dispatcher.h"
 #include "render/scene/node.h"
+#include "shell/wayland/layer_surface.h"
 #include "ui/builders.h"
 #include "ui/controls/box.h"
 #include "ui/controls/button.h"
@@ -25,7 +26,6 @@
 #include "ui/controls/label.h"
 #include "ui/palette.h"
 #include "ui/style.h"
-#include "wayland/layer_surface.h"
 #include "wayland/wayland_connection.h"
 #include "wayland/wayland_seat.h"
 
@@ -46,8 +46,7 @@ namespace capture {
     constexpr float kDimensionPaddingY = 4.0F;
     constexpr double kHandleMargin = 15.0; // Hitbox size in pixels
 
-    [[nodiscard]] capture::DragMode
-    hitTestSelection(double x, double y, double x0, double y0, double x1, double y1, double margin) {
+    capture::DragMode hitTestSelection(double x, double y, double x0, double y0, double x1, double y1, double margin) {
       const bool withinX = x >= x0 - margin && x <= x1 + margin;
       const bool withinY = y >= y0 - margin && y <= y1 + margin;
 
@@ -103,7 +102,7 @@ namespace capture {
     }
 
     // Right-button resize zones: outer thirds of each axis pick the matching edge or corner.
-    [[nodiscard]] capture::DragMode
+    capture::DragMode
     hitTestRegionThirds(double x, double y, double x0, double y0, double x1, double y1, double margin) {
       if (x < x0 - margin || x > x1 + margin || y < y0 - margin || y > y1 + margin) {
         return capture::DragMode::None;
@@ -135,7 +134,7 @@ namespace capture {
       return capture::DragMode::None;
     }
 
-    [[nodiscard]] std::uint32_t cursorShapeForDragMode(capture::DragMode mode) {
+    std::uint32_t cursorShapeForDragMode(capture::DragMode mode) {
       switch (mode) {
       case capture::DragMode::TopEdge:
       case capture::DragMode::BottomEdge:
@@ -156,7 +155,7 @@ namespace capture {
       }
     }
 
-    [[nodiscard]] const WaylandOutput* findOutput(const WaylandConnection& wayland, wl_output* output) {
+    const WaylandOutput* findOutput(const WaylandConnection& wayland, wl_output* output) {
       for (const auto& entry : wayland.outputs()) {
         if (entry.output == output) {
           return &entry;
@@ -165,10 +164,9 @@ namespace capture {
       return nullptr;
     }
 
-    [[nodiscard]] LayerShellKeyboard overlayKeyboardMode() { return LayerShellKeyboard::Exclusive; }
+    LayerShellKeyboard overlayKeyboardMode() { return LayerShellKeyboard::Exclusive; }
 
-    [[nodiscard]] const ScreencopyImage*
-    frozenImageForOutput(const std::vector<FrozenScreenshot>& screenshots, wl_output* output) {
+    const ScreencopyImage* frozenImageForOutput(const std::vector<FrozenScreenshot>& screenshots, wl_output* output) {
       for (const auto& entry : screenshots) {
         if (entry.output == output) {
           return &entry.image.image;
@@ -177,7 +175,7 @@ namespace capture {
       return nullptr;
     }
 
-    [[nodiscard]] wl_output* outputAtGlobalPoint(const WaylandConnection& wayland, double globalX, double globalY) {
+    wl_output* outputAtGlobalPoint(const WaylandConnection& wayland, double globalX, double globalY) {
       for (const auto& out : wayland.outputs()) {
         if (out.output == nullptr || out.logicalWidth <= 0 || out.logicalHeight <= 0) {
           continue;
@@ -192,7 +190,7 @@ namespace capture {
       return nullptr;
     }
 
-    [[nodiscard]] std::string outputPickerLabel(const WaylandOutput& output) {
+    std::string outputPickerLabel(const WaylandOutput& output) {
       if (!output.connectorName.empty()) {
         return output.connectorName;
       }
@@ -974,42 +972,27 @@ namespace capture {
     return false;
   }
 
-  bool ScreenshotRegionOverlay::onKeyboardEvent(const KeyboardEvent& event) {
-    if (!m_active || !event.pressed || m_wayland == nullptr) {
-      return false;
+  void ScreenshotRegionOverlay::onKeyboardEvent(const KeyboardEvent& event) {
+    if (!m_active) {
+      return;
     }
 
-    wl_surface* const kbSurface = m_wayland->lastKeyboardSurface();
-    bool onOverlay = false;
-    for (const auto& inst : m_instances) {
-      if (inst != nullptr && inst->surface != nullptr && inst->surface->wlSurface() == kbSurface) {
-        onOverlay = true;
-        break;
-      }
+    // Whichever Noctalia surface holds the keyboard: on niri an older exclusive panel such as the
+    // launcher keeps it under the overlay, and the keys must still act here, not there (#4641).
+    if (KeybindMatcher::matches(KeybindAction::Cancel, event.sym, event.modifiers)) {
+      cancelSelection();
+      return;
     }
-    if (!onOverlay) {
-      return false;
+    if (!m_confirming) {
+      return;
     }
-
-    if (!KeybindMatcher::matches(KeybindAction::Cancel, event.sym, event.modifiers)) {
-      if (m_confirming) {
-        if (KeybindMatcher::matches(KeybindAction::Copy, event.sym, event.modifiers)) {
-          confirmPendingSelection(ConfirmAction::ForceClipboard);
-          return true;
-        }
-        if (KeybindMatcher::matches(KeybindAction::Save, event.sym, event.modifiers)) {
-          confirmPendingSelection(ConfirmAction::ForceSave);
-          return true;
-        }
-        if (KeySymbol::isEnterOrSpace(event.sym)) {
-          confirmPendingSelection(ConfirmAction::None);
-          return true;
-        }
-      }
-      return false;
+    if (KeybindMatcher::matches(KeybindAction::Copy, event.sym, event.modifiers)) {
+      confirmPendingSelection(ConfirmAction::ForceClipboard);
+    } else if (KeybindMatcher::matches(KeybindAction::Save, event.sym, event.modifiers)) {
+      confirmPendingSelection(ConfirmAction::ForceSave);
+    } else if (KeySymbol::isEnterOrSpace(event.sym)) {
+      confirmPendingSelection(ConfirmAction::None);
     }
-    cancelSelection();
-    return true;
   }
 
   void ScreenshotRegionOverlay::abortWithError(const std::string& message) {

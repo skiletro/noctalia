@@ -933,6 +933,7 @@ namespace settings {
       spec.literalLabels = true;
       spec.schema.defaultValue = field != nullptr ? field->defaultValue() : entry.panelLayerDefault;
       spec.options = {
+          {"follow", tr("settings.options.layer.follow")},
           {"top", tr("settings.options.layer.top")},
           {"overlay", tr("settings.options.layer.overlay")},
       };
@@ -1272,7 +1273,9 @@ namespace settings {
     }
     // OptionalDouble unset means inherit/auto, 0 is a valid explicit radius and must persist. Bar-inherited
     // settings resolve an unset value from the bar, so an explicit default value must persist too.
-    if (field->type == schema::WidgetSettingType::OptionalDouble || field->inheritsFromBar) {
+    if (field->type == schema::WidgetSettingType::OptionalDouble
+        || field->inheritsFromBar
+        || field->defaultValueCountsAsOverride) {
       return false;
     }
     return configOverrideValueMatchesWidgetSetting(overrideValue, field->defaultValue);
@@ -1343,7 +1346,9 @@ namespace settings {
       }
       return !widgetSettingValuesEqual(*withValue, *withoutValue);
     }
-    if (field->type == schema::WidgetSettingType::OptionalDouble || field->inheritsFromBar) {
+    if (field->type == schema::WidgetSettingType::OptionalDouble
+        || field->inheritsFromBar
+        || field->defaultValueCountsAsOverride) {
       if (!withValue.has_value() || !withoutValue.has_value()) {
         return true;
       }
